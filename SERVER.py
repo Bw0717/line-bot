@@ -1,38 +1,29 @@
 from flask import Flask, request
-from linebot.models import (TemplateSendMessage,ButtonsTemplate,MessageAction)
+from linebot.models import TemplateSendMessage,ButtonsTemplate,MessageAction,URIAction,TextSendMessage,ImageSendMessage,CarouselTemplate,CarouselColumn
 import json
-from ping3 import ping # type: ignore
-from linebot.models import RichMenu, RichMenuArea, RichMenuBounds, URIAction, PostbackAction, MessageAction
+from ping3 import ping 
 import os
-from linebot.models import FlexSendMessage
 from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import PostbackAction,URIAction, MessageAction, TemplateSendMessage, ButtonsTemplate
-from linebot.models import TextSendMessage, ImageSendMessage
-from linebot.models import MessageAction, TemplateSendMessage, ConfirmTemplate
-from linebot.models import MessageAction, TemplateSendMessage, CarouselTemplate,  CarouselColumn
-from linebot.models import ImageSendMessage
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import Select
-from selenium.webdriver.common.keys import Keys
 import pandas as pd
-import keyboard # type: ignore
+import keyboard 
 import time
 import requests
 import re
 import random
+from openpyxl import Workbook, load_workbook
+from datetime import datetime
+from openpyxl.utils import get_column_letter
 
 model_path = "/Users/chienchihhsiang/.lmstudio/models/shenzhi-wang/Llama3-8B-Chinese-Chat-GGUF-8bit/Llama3-8B-Chinese-Chat-q8_0-v2_1.gguf"
-LLAMA_API_URL = 'http://192.168.1.109:1234/v1/chat/completions' 
+LLAMA_API_URL = '' 
 Material = False
 in_process = False
 in_process2 = False
@@ -40,6 +31,7 @@ pass_process = False
 sec_in_process = False
 sec_in_process2 = False
 unlock_repaire_station = False
+image_process = False
 unlock_repaire_station2 = False
 QRcode_check = False
 return_msg = False
@@ -47,9 +39,40 @@ internet_process = False
 class_process = False
 global error_code
 error_code = None
-line_bot_api = LineBotApi('Pn6oyBEK0RJLR1U0OEY7q35O+RTM0PaHrSAzQ8805ZRqNqf/O2A1CM5YWMeQoB+8ngYCLqoEK6nmHi9T6YCycuSOSKHiTBQWG56vUUY6RTbDr96z2Iq+Uo7SSVdWWBuDOdClGrB4Y8bfvXrMqmnwBQdB04t89/1O/w1cDnyilFU=')
+line_bot_api = LineBotApi('')
+handler = WebhookHandler('')
+
+
+def check_or_create_excel(file_path="E:/MES自動化/line_bot_log.xlsx"):
+    if os.path.exists(file_path):
+        print(f"檔案 '{file_path}' 已存在，正在讀取...")
+        workbook = load_workbook(file_path)
+        sheet = workbook.active
+        if sheet.max_row > 1 and sheet.max_column > 1:
+            print("第一列和第一行的數據如下：")
+            for row in sheet.iter_rows(min_row=1, max_row=1):
+                for cell in row:
+                    print(cell.value, end="\t")
+            print()
+        else:
+            print("檔案存在，但內容是空的。")
+    else:
+        print(f"檔案 '{file_path}' 不存在，正在創建新檔案...")
+        workbook = Workbook()
+        sheet = workbook.active
+
+        sheet.title = "Log"
+        sheet.append(["Timestamp", "ID", "Event", "Department", "Class", "Serial Number"])
+        print("已創建標題行。")
+
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)  # 確保路徑存在
+        workbook.save(file_path)
+        print(f"新檔案 '{file_path}' 已創建並儲存。")
+
+    print("操作完成！")
 
 AT = "U1d2fae8c03fbc0819fe079da5250d9bc"
+
 def bug_c_automation(work_order,input_QR):
     global actions2
     options = Options()
@@ -96,13 +119,11 @@ def bug_c_automation(work_order,input_QR):
         driver.switch_to.frame(iframe)
         keyboard.press_and_release('ctrl+-')
         keyboard.press_and_release('ctrl+-')
-
-        element5 = wait2.until(EC.element_to_be_clickable((By.XPATH, '//a[text()="批號"]')))
-        element6 = driver.find_element(By.ID, "btnLotQuery")
+        element6 = wait2.until(EC.presence_of_element_located((By.ID, "btnLotQuery")))
         element6.click()
         iframe2 = wait.until(EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "LotListFieldSelect.aspx")]')))
         driver.switch_to.frame(iframe2)
-        checkbox = wait.until(EC.presence_of_element_located((By.ID, "tvn0CheckBox")))
+        checkbox = wait2.until(EC.presence_of_element_located((By.ID, "tvn0CheckBox")))
         if checkbox.is_selected():
             checkbox.click()
         else:
@@ -116,8 +137,31 @@ def bug_c_automation(work_order,input_QR):
         driver.switch_to.default_content()
         iframe = driver.find_element(By.CLASS_NAME, "win1")
         driver.switch_to.frame(iframe)
-        elementQR = driver.find_element(By.XPATH, f'//td[text()={input_QR}]')
-        elementQR.click()
+        
+        if work_order in ["ARG","AMG"]:
+            try:
+                elementQR = wait.until(EC.presence_of_element_located((By.XPATH, f"//td[text()='{input_QR}']")))
+                elementQR.click()
+            except:
+                error_code = "1"
+                return error_code
+        elif work_order == "AM2":
+            try:
+                element7 = wait.until(EC.presence_of_element_located((By.ID, "gvDataViewer_ctl02_hlLot")))
+                driver.execute_script("arguments[0].click();", element7)
+                actions.move_to_element(element7).click().perform()
+                Niframes = WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.TAG_NAME, "iframe")))
+                driver.switch_to.frame(Niframes[0])
+                element8 = wait.until(EC.presence_of_element_located((By.ID, "btnExit")))
+                element8.click()
+
+            except:
+                error_code = "1"
+                return error_code
+
+
+
+        time.sleep(1)
         driver.switch_to.default_content()
         element_menu = wait.until(
             EC.element_to_be_clickable((By.ID, "TestMenu"))
@@ -162,11 +206,18 @@ def requests_website_test(work_order,tk):
         else:
             line_bot_api.reply_message(tk,TextSendMessage(f"連線不良，{response.elapsed.total_seconds()} 秒"))
     except requests.exceptions.RequestException as e:
-        print(f"測試失敗: {e}")
+        line_bot_api.reply_message(tk,TextSendMessage(f"連線失敗"))
+
+
+
+
 
 def repair_automation(work_order,input_QR,class_number):
     global actions2
     global error_code
+    global error_text
+    error_text = None
+    error_code = False
     options = Options()
     options.add_argument('--ignore-certificate-errors')  
     options.add_argument('--disable-web-security')      
@@ -178,6 +229,7 @@ def repair_automation(work_order,input_QR,class_number):
     wait = WebDriverWait(driver, 10)  
     wait2 = WebDriverWait(driver, 300)  
     try:
+        global last_column
         driver.get(f"http://cimes.seec.com.tw/{work_order}/CimesDesktop.aspx")
         username_input = wait.until(
         EC.presence_of_element_located((By.CSS_SELECTOR, "input#UserName"))
@@ -202,99 +254,36 @@ def repair_automation(work_order,input_QR,class_number):
         )
         actions = ActionChains(driver)
         actions.move_to_element(op_element).click().perform()
-        element4 = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[righttype="WIPRULE"][cimesclass="QryProg"]')))
-        element4.click()
-        button = wait.until(EC.element_to_be_clickable((By.XPATH, '//span[text()="在製品查詢"]')))
-        actions.move_to_element(button).click().perform()
-        driver.switch_to.default_content()
-        iframe = driver.find_element(By.CLASS_NAME, "win1")
-        driver.switch_to.frame(iframe)
-        keyboard.press_and_release('ctrl+-')
-        keyboard.press_and_release('ctrl+-')
-
-        #element5 = wait2.until(EC.element_to_be_clickable((By.XPATH, '//a[text()="批號"]')))
-        
-
-        element6 = wait2.until(EC.presence_of_element_located((By.ID, "btnLotQuery")))
-        #element6 = driver.find_element(By.ID, "btnLotQuery")
-        element6.click()
-
-
-        iframe2 = wait.until(EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "LotListFieldSelect.aspx")]')))
-        driver.switch_to.frame(iframe2)
-        checkbox = wait2.until(EC.presence_of_element_located((By.ID, "tvn0CheckBox")))
-        if checkbox.is_selected():
-            checkbox.click()
-        else:
-            pass
-        input_element3 = wait.until(EC.presence_of_element_located((By.ID, "gvFilter_ctl03_ttbValue")))
-        input_element3.clear()
-        input_element3.send_keys(input_QR)
-        Query = wait.until(EC.presence_of_element_located((By.ID, "btnQuery")))
-        Query.click()
-        time.sleep(1)
-        driver.switch_to.default_content()
-        iframe = driver.find_element(By.CLASS_NAME, "win1")
-        driver.switch_to.frame(iframe)
-        if work_order in ["ARG","AMG"]:
-            try:
-                element7 = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#divOuter a.CSLot")))
-            except:
-                error_code = "1"
-                return error_code
-        elif work_order == "AM2":
-            try:
-                element7 = wait.until(EC.presence_of_element_located((By.ID, "gvDataViewer_ctl02_hlLot")))
-            except:
-                error_code = "1"
-                return error_code
-        driver.execute_script("arguments[0].click();", element7)
-        actions.move_to_element(element7).click().perform()
-        Niframes = WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.TAG_NAME, "iframe")))
-        driver.switch_to.frame(Niframes[0])
-        a_element2 = driver.find_element(By.XPATH, "//a[span[text()='歷史記錄']]")
-        driver.execute_script("arguments[0].click();", a_element2)
-        btnHisQuery = wait.until(EC.presence_of_element_located((By.ID, "btnHisQuery")))
-        driver.execute_script("arguments[0].click();", btnHisQuery)
-        buttons = wait2.until(EC.presence_of_all_elements_located((By.XPATH, "//a[@class='button' and starts-with(@href, 'javascript:__doPostBack')]")))
-        buttons[-1].click()
-        time.sleep(5)
-        try:
-            tbody = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'table#gvHist > tbody'))
-            )
-            rows = tbody.find_elements(By.CSS_SELECTOR, 'tr')
-            print(len(rows))
-            last_row = rows[-1]
-            last_column = last_row.find_elements(By.CSS_SELECTOR, 'td')[4].text  
-            print("最後一筆工作站:", last_column)
-        except:
-            pass
-        btnExit = wait.until(EC.presence_of_element_located((By.ID, "btnExit")))
-        driver.execute_script("arguments[0].click();", btnExit)
-        time.sleep(1)
-        driver.switch_to.default_content()
-        element_menu = wait.until(
-            EC.element_to_be_clickable((By.ID, "TestMenu"))
-        )
-        element_menu.click()
-        driver.switch_to.frame("ifmMenu")
-        op_element = wait.until(
-            EC.visibility_of_element_located((By.CSS_SELECTOR, "#navRULE.ctgr_hov"))
-        )
-        actions = ActionChains(driver)
-        actions.move_to_element(op_element).click().perform()
         element4 = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[righttype="WIPRULE"][cimesclass="WipRule"]')))
         element4.click()
         button2 = wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(@title, '維修(客)')]")))
         actions.move_to_element(button2).click().perform()
         driver.switch_to.default_content()
-        Giframes = WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.TAG_NAME, "iframe")))
-        driver.switch_to.frame(Giframes[1])
+        iframe = driver.find_element(By.CLASS_NAME, "win1")
+        driver.switch_to.frame(iframe)
+        keyboard.press_and_release('ctrl+-')
+        keyboard.press_and_release('ctrl+-')
         input1 = wait.until(EC.presence_of_element_located((By.ID, "ttbLot")))
         input1.send_keys(input_QR)
         input1.send_keys(Keys.RETURN)
-        time.sleep(2)
+        time.sleep(1)
+        try:
+            error_element = wait2.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".exceptionTitle")))
+            error_text = error_element.text    
+            close_button = wait2.until(EC.element_to_be_clickable(
+                (By.XPATH, "//td//input[@value='關閉' and @type='button']")
+            ))
+            driver.execute_script("arguments[0].click();", close_button)
+            error_code = True
+            return
+        except:
+            pass
+        select_OTHER = wait.until(EC.presence_of_element_located((By.ID, "ddlRepairFunction")))
+        selectlist3 = Select(select_OTHER)
+        selectlist3.select_by_visible_text("[OTHER]")
+        select_list = wait.until(EC.presence_of_element_located((By.ID, "ddlDutyUnit")))
+        enable_input2 = wait.until(EC.presence_of_element_located((By.NAME, "ttbDefectOperation")))
+        last_column = enable_input2.get_attribute('value')
         select_list = wait.until(EC.presence_of_element_located((By.ID, "ddlDutyUnit")))
         select = Select(select_list)
         select.select_by_visible_text(class_number)
@@ -309,6 +298,7 @@ def repair_automation(work_order,input_QR,class_number):
         time.sleep(1)    
     finally:
         driver.quit()
+
 
 
 
@@ -532,11 +522,11 @@ def send_carousel_message(user_id):
                     actions=[
                         URIAction(
                             label='自動排班模型',
-                            uri='https://seec-bw0717.netlify.app/index.html'
+                            uri='https://seec-auto.vercel.app/'
                         ),
-                        MessageAction(
-                            label='待開發',
-                            text='待開發'
+                        URIAction(
+                            label='掃描器',
+                            uri='https://line.me/R/nv/QRCodeReader'
                         ),
                         MessageAction(
                             label='QRcode小工具',
@@ -600,45 +590,42 @@ def check_connection_status(response_times):
 user_ticket_number = None
 
 
-def autoweb():
-    driver = webdriver.Chrome()
-    try:
-
-        driver.get("https://www.google.com")
-        time.sleep(5)
-    finally:
-        driver.quit()
-
-def replace_number_with_random_iteratively(user_id,text):
-    # 定義正則表達式，匹配 ";數字;單位" 格式
+def replace_number_with_random_iteratively(user_id,text,tk):
     pattern = r";(\d+);[A-Za-z]+"
-    edited_text = text  # 初始文字
-    generated_numbers = []  # 儲存生成的隨機數字
-    
-    # 執行多次替換
+    edited_text = text  
+    generated_numbers = []  
     for _ in range(3):
-        # 找到第一個匹配
         match = re.search(pattern, edited_text)
         if match:
-            original_number = match.group(1)  # 匹配到的數字
-            # 生成隨機數字
+            original_number = match.group(1)  
             random_number = random.randint(10000, 99999)
-            # 替換舊數字為新數字
             edited_text = re.sub(rf";{original_number};", f";{random_number};", edited_text, count=1)
-            # 儲存隨機數字
-            # 每次替換後輸出當前文字
             image(user_id = user_id,content = edited_text)
         else:
-            # 如果沒有更多匹配，提早結束迴圈
-            print("格式可能有與其他不同。")
+            line_bot_api.reply_message(tk,TextSendMessage(f"格式可能有誤"))
             break
-    
     return edited_text, generated_numbers
+
+def log_action(file_path="E:/MES自動化/line_bot_log.xlsx", id="", event="",department="", class_number="",Serial_number=""):
+    check_or_create_excel(file_path)
+    workbook = load_workbook(file_path)
+    sheet = workbook.active
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sheet.append([timestamp, id, event, department, class_number, Serial_number])
+    for col_num, column_cells in enumerate(sheet.columns, 1):
+        max_length = max(len(str(cell.value)) if cell.value else 0 for cell in column_cells)
+        sheet.column_dimensions[get_column_letter(col_num)].width = max_length + 2
+
+    workbook.save(file_path)
+    print(f"檔案 '{file_path}' 已更新並儲存。")
+check_or_create_excel()
 
 app = Flask(__name__)
 
 @app.route("/", methods=['POST'])
 def linebot():
+
     global class_process
     global class_number
     global work_order
@@ -660,6 +647,7 @@ def linebot():
     global title_value
     global error_code
     global value
+    global image_process
     body = request.get_data(as_text=True)                    
     try:
         json_data = json.loads(body)                         
@@ -673,9 +661,10 @@ def linebot():
         type = json_data['events'][0]['message']['type']  
         user_id = None   
         user_id = json_data['events'][0]['source']['userId']
-        if type=="text":
+        if type == "text" :
             msg = json_data['events'][0]['message']['text']  
             if msg == "開立工單":
+                event = msg
                 select_web(tk)
                 value = None
                 title_value = None
@@ -705,12 +694,14 @@ def linebot():
                         else:    
                             image(user_id=user_id,content=f"{user_ticket_number}-001")
                             line_bot_api.push_message(user_id, TextSendMessage("🎉🎉🎊工單開立完成🎊🎉🎉"))
+                            log_action(id=user_id, event="開立工單",department=work_order,Serial_number=value)
                     except:
                         line_bot_api.push_message(user_id, TextSendMessage("查無此工單"))
                         pass
                     sec_in_process = False
 
             elif msg == "序號卡Create":
+                event = msg
                 user_ticket_number2 = None
                 work_order = None
                 select_web(tk)
@@ -731,7 +722,8 @@ def linebot():
                     line_bot_api.reply_message(tk, TextSendMessage(f"序號：{user_ticket_number2}，處理中，請稍候"))
                     try:
                         bug_c_automation(work_order=work_order,input_QR=user_ticket_number2)
-                        line_bot_api.push_message(user_id, TextSendMessage("🎉🎉🎊解除卡Create完成🎊🎉🎉，請從第二站開始刷讀"))
+                        line_bot_api.push_message(user_id, TextSendMessage("🎉🎊解除卡Create完成🎊🎉請從第二站開始作業，若本來在第二站請從第三站開始作業"))
+                        log_action(id=user_id, event="序號卡Create",department=work_order, Serial_number=user_ticket_number2)
                     except:
                         line_bot_api.push_message(user_id, TextSendMessage("系統發生異常"))
                         pass
@@ -741,6 +733,7 @@ def linebot():
                 send_carousel_message(user_id)
 
             elif msg == "MES網路測試":
+                event = msg
                 work_order = None
                 select_web(tk)
                 internet_process = True
@@ -749,10 +742,13 @@ def linebot():
                     internet_process = False
                 else:
                     work_order = msg
-                    requests_website_test(work_order = work_order,tk=tk)                  
-                    internet_process = False
+                    requests_website_test(work_order = work_order,tk=tk)      
+                    internet_process = False            
+                    log_action(id=user_id, event="MES網路測試",department=work_order)
+
 
             elif msg == "解除維修站":
+                event = msg
                 select_web(tk)
                 work_order = None
                 QRcode_content = None
@@ -795,6 +791,7 @@ def linebot():
                 elif work_order == "AM2" and (msg == "AF1" or msg == "AF2" or msg == "AF3"):
                     line_bot_api.reply_message(tk, TextSendMessage("請輸入序號，或輸入[返回]結束動作"))
                     unlock_repaire_station2 = False
+                    class_number = msg
                     class_process = True
                 else:
                     if work_order == "ARG":                      
@@ -810,19 +807,20 @@ def linebot():
                     class_process = False
                 else:
                     unlock_repaire_station_memory = msg
+                    line_bot_api.reply_message(tk, TextSendMessage(f"{unlock_repaire_station_memory}處理中，請稍後"))
                     try:
+                        error_code = None
                         repair_automation(work_order = work_order,input_QR = unlock_repaire_station_memory,class_number=class_number)
-                        if error_code == "1":
-                            line_bot_api.push_message(user_id, TextSendMessage("找不到此序號")) 
-                        else:
-                            line_bot_api.push_message(user_id, TextSendMessage("🎉🎉🎊解除維修完成🎊🎉🎉")) 
+                        line_bot_api.push_message(user_id, TextSendMessage(f"🎉🎉🎊解除維修完成🎊🎉🎉，請從「{last_column}」刷讀")) 
+                        log_action(id=user_id, event="解除維修站",department=work_order, class_number=class_number,Serial_number=unlock_repaire_station_memory)
                     except:
                         line_bot_api.push_message(user_id, TextSendMessage("系統發生異常")) 
                         pass
-
-                    
                     class_process = False
-
+            elif error_code:
+                line_bot_api.push_message(user_id, TextSendMessage(F"{error_text}"))
+                error_code = False
+                
             elif msg == "公告":
                 line_bot_api.reply_message(tk, TextSendMessage("請輸入密碼："))
                 pass_process = True
@@ -835,6 +833,7 @@ def linebot():
                     pass_process = False
 
             elif msg == "QRcode小工具":     
+                event = msg
                 line_bot_api.reply_message(tk, TextSendMessage("請輸入內容，或輸入[返回]取消動作"))
                 QRcode_check = True
             elif QRcode_check:
@@ -844,6 +843,11 @@ def linebot():
                     QRcode_content = msg
                     image(user_id=user_id,content=QRcode_content)
                     QRcode_check = False
+                    try:
+                        log_action(id=user_id, event="QRcode小工具", Serial_number=QRcode_content)
+                        print("成功")
+                    except:
+                        print("失敗")
             elif msg == "反應問題":
                 line_bot_api.reply_message(tk,TextSendMessage('請輸入要反應的事項，結束請輸入「結束」。'))
                 return_msg = True
@@ -855,16 +859,28 @@ def linebot():
                     line_bot_api.push_message(AT, TextSendMessage(msg)) 
                     pass
             elif msg == "物料QR小工具":
+                event = msg
                 line_bot_api.reply_message(tk, TextSendMessage("請輸入材料編號，或輸入[返回]結束動作"))
                 Material = True
             elif Material:
                 if msg == "返回":
                     Material = False
                 else:
-                    replace_number_with_random_iteratively(user_id=user_id,text=msg)
+                    text = msg
+                    replace_number_with_random_iteratively(user_id=user_id,text=text,tk=tk)
+                    log_action(id=user_id, event="物料QR小工具", Serial_number=text)
                     Material = False
 
-
+            elif msg == "圖像辨識文字":
+                line_bot_api.reply_message(tk,TextSendMessage('尚未完成'))
+                """image_process = True
+            elif image_process:
+                if msg == "返回":
+                    image_process = False
+                else:
+                    callback()
+                    handle_image_message(event)
+                    image_process = False"""
             else:
                 line_bot_api.reply_message(tk,TextSendMessage('其他需求請洽：製管MES組'))# 回傳訊息
         else:
@@ -872,8 +888,8 @@ def linebot():
 
         
     except:
-        print(body)                                          # 如果發生錯誤，印出收到的內容
-    return 'OK'                                              # 驗證 Webhook 使用，不能省略
+        print(body)                                         
+    return 'OK'                                              
 
 if __name__ == "__main__":
     app.run()
